@@ -11,7 +11,6 @@ library(hgu133plus2cdf)
 library(R.utils)
 
 source('../../EPB main/EPB.R')
-source('../../helper functions/Rejection Region helper.R')
 source('../../helper functions/Distribution Visualization helper.R')
 
 # CEL Data Download
@@ -136,20 +135,23 @@ algorithm_list = c(1,2,3,4,5)
 #length(my_BH(result$B_F, alpha)) # 0.1: 413 / 0.01: 0
 #length(my_BH(result$EV_test, alpha)) # 0.1: 4721 / 0.01: 2180
 
+# Generate the H plot for GSE9101
+
 #df_2D_GSE9101 = data.frame(x = result$'2D_grid'[,1], y = result$'2D_grid'[,2], prob = result$'2D_mass')
 #write.csv(df_2D_GSE9101, './Result/2D_GSE9101.csv')
 
-# Generate the H plot for GSE9101
-
 df_2D_GSE9101 = read.csv('./Result/2D_GSE9101.csv')
 
-#Total_mass = 0.999999
-#plot_H_GSE9101 = plotter_2D_ALL(Total_mass, df_2D_GSE9101, '')
+Total_mass = 0.999999
+plot_H_GSE9101 = plotter_2D_ALL(Total_mass, df_2D_GSE9101, '')
 #ggsave(filename = './Result/H(var1, var2) of GSE9101.jpg', plot = plot_H_GSE9101, width = 12, height = 10, dpi = 500)
 
 # Generate the G plot for GSE9101
 
-df_1D_GSE9101 = data.frame(x = df_2D_GSE9101$x/df_2D_GSE9101$y, prob = df_2D_GSE9101$prob)
+#df_1D_GSE9101 = data.frame(x = result$'1D_grid', prob = result$'1D_mass')
+#write.csv(df_1D_GSE9101, './Result/1D_GSE9101.csv')
+
+df_1D_GSE9101 = read.csv('./Result/1D_GSE9101.csv')
 df_1D_GSE9101_with_ecdf = arrange(df_1D_GSE9101, x) %>% mutate(ecdf = cumsum(prob))
 df_ecdf = data.frame(log_lambda = log(df_1D_GSE9101_with_ecdf$x), ecdf = df_1D_GSE9101_with_ecdf$ecdf)
 
@@ -164,116 +166,8 @@ ecdf_p = ggplot(df_ecdf, aes(x = log_lambda, y = ecdf)) +
   theme_minimal(base_size = 22) +
   theme(legend.position = "none")
 
-ggsave("./Result/GSE9101 ecdf of G.jpg", ecdf_p, width = 8, height = 6, dpi = 400)
+#ggsave("./Result/GSE9101 ecdf of G.jpg", ecdf_p, width = 8, height = 6, dpi = 400)
 
-#plot_G_GSE9101 = plotter_1D(df_1D_GSE9101, '')
+plot_G_GSE9101 = plotter_1D(df_1D_GSE9101, '')
 #ggsave(filename = './Result/G(lambda) of GSE9101.jpg', plot = plot_G_GSE9101, width = 8, height = 6, dpi = 500)
 
-# Generate the Rejection Region plot
-
-grid = df_2D_GSE9101[, 2:3]
-mass = df_2D_GSE9101[, 4]
-grid_1D = grid[, 1] / grid[, 2]
-
-tau_list = info$S1_list/info$S2_list
-log_tau_list = log(tau_list)
-log_tau_list = log_tau_list[log_tau_list >= -7.5 & log_tau_list <= 7.5]
-tau_grid = exp(seq(min(log_tau_list), max(log_tau_list), length.out = 1000))
-
-t_BF_list = c()
-for (i in 1:nrow(expr)) {
-  X1_i = as.numeric(X1[i,])
-  X2_i = as.numeric(X2[i,])
-  m1_i = mean(X1_i)
-  m2_i = mean(X2_i)
-  s1_i = var(X1_i)
-  s2_i = var(X2_i)
-  t_BF_i = (m1_i - m2_i) / sqrt(s1_i/K1 + s2_i/K2)
-  t_BF_list = c(t_BF_list, t_BF_i)
-}
-t_BF_list = t_BF_list[log(tau_list) >= -7.5 & log(tau_list) <= 7.5] # Range of sample t_BF to determine range of root solver
-
-## Rejection Region for VREPB
-t_VREPB = c()
-
-for (tau in tau_grid) {
-  t_VREPB_i = BF_pvalue_VREPB_solver_positive(K1, K2, grid_1D, mass, tau, alpha)
-  t_VREPB = append(t_VREPB, t_VREPB_i)
-}
-
-## Rejection Region for B_F
-t_BF = c()
-
-for (tau in tau_grid) {
-  t_BF_i = BF_pvalue_BF_solver_positive(tau, K1, K2, alpha)
-  t_BF = append(t_BF, t_BF_i)
-}
-
-## Rejection Region for Welch
-t_Welch = c()
-
-for (tau in tau_grid) {
-  t_Welch_i = BF_pvalue_Welch_solver_positive(tau, K1, K2, alpha)
-  t_Welch = append(t_Welch, t_Welch_i)
-}
-
-## Rejection Region for EV-test
-t_EV = c()
-
-for (tau in tau_grid) {
-  t_EV_i = BF_pvalue_EV_solver_positive(tau, K1, K2, alpha)
-  t_EV = append(t_EV, t_EV_i)
-}
-
-## Plot rejection region for VREPB, B_F, Welch, EV_test
-
-size = 1
-
-curve_colors = c(
-  "VREPB"   = "#0072B2",   # blue
-  "B-F"     = "#CC79A7",   # magenta
-  "Welch"   = "#E69F00",   # gold
-  "EV-test"  = "#D55E00"     # orange
-)
-
-plot_2D = function(u1, u2) {
-  ggplot(data.frame(u1 = u1, u2 = u2), aes(x = u1, y = u2)) +
-    stat_bin2d(bins = 80) +
-    scale_fill_gradient(low = "lightblue", high = "darkblue") +
-    labs(x = expression(log(hat(lambda)[i])), y = expression(T[i]^{BF}), fill = "Count") +
-    scale_y_continuous(limits = c(-12, 12)) +
-    theme_minimal(base_size = 16) +
-    theme(
-      panel.grid.major = element_line(colour = "gray80", size=0.5),
-      panel.grid.minor = element_line(colour = "gray90", size=0.25),
-      legend.position = "top",
-      legend.text = element_text(size = 10),
-      legend.title = element_text(size = 10),
-      plot.margin = margin(12, 16, 12, 12)
-    )
-}
-
-p = plot_2D(log_tau_list, t_BF_list) +
-  geom_line(data = data.frame(x = log(tau_grid), y = t_VREPB), aes(x = x, y = y, color = "VREPB"), size = size) +
-  geom_line(data = data.frame(x = log(tau_grid), y = -t_VREPB), aes(x = x, y = y, color = "VREPB"), size = size) +
-  
-  geom_line(data = data.frame(x = log(tau_grid), y = t_BF), aes(x = x, y = y, color = "B-F"), size = size) +
-  geom_line(data = data.frame(x = log(tau_grid), y = -t_BF), aes(x = x, y = y, color = "B-F"), size = size) +
-  
-  geom_line(data = data.frame(x = log(tau_grid), y = t_EV), aes(x = x, y = y, color = "EV-test"), size = size) +
-  geom_line(data = data.frame(x = log(tau_grid), y = -t_EV), aes(x = x, y = y, color = "EV-test"), size = size) +
-  
-  geom_line(data = data.frame(x = log(tau_grid), y = t_Welch), aes(x = x, y = y, color = "Welch"), size = size) +
-  geom_line(data = data.frame(x = log(tau_grid), y = -t_Welch), aes(x = x, y = y, color = "Welch"), size = size) +
-  
-  scale_color_manual(
-    name = NULL, 
-    values = curve_colors,
-    breaks = c("VREPB", "B-F", "Welch", "EV-test"),
-    labels = c("VREPB", "B-F", "Welch", "EV-test")
-  ) +
-  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.7), 
-         color = guide_legend(override.aes = list(size = 2)))
-
-# Save as JPG
-ggsave("./Result/Rejection_Region_GSE9101.jpg", p, width = 7, height = 5.5, dpi = 400)

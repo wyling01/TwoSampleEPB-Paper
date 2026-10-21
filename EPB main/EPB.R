@@ -48,7 +48,15 @@ p_value_VREPB_j = function(n1, n2, Z1, Z2, S1, S2, grid, mass, tau_j) {
   return (P_value_j)
 }
 
-VR_NPMLE = function(tau, B, m, n1, n2, lower_quantile, upper_quantile) {
+VR_NPMLE = function(info, B, lower_quantile, upper_quantile) {
+  m = info$m
+  n1 = info$n1
+  n2 = info$n2
+  S1_list = info$S1_list
+  S2_list = info$S2_list
+  
+  tau = S1_list/S2_list
+
   lower = quantile(tau, lower_quantile)
   upper = quantile(tau, upper_quantile)
   log_u = seq(log(lower), log(upper), length = B)
@@ -56,14 +64,18 @@ VR_NPMLE = function(tau, B, m, n1, n2, lower_quantile, upper_quantile) {
   d = rep(1,B)
   w = rep(1, m)/m
   A = outer(tau, u, FUN = p_tau_j_given_lambda, n1 = n1, n2 = n2)
-  result = KWPrimal(A, d, w)
+  row_max = apply(A, 1, max)
+  stopifnot(all(is.finite(row_max)), all(row_max > 0))
+  A_scaled = sweep(A, 1, row_max, "/")
+  
+  result = KWPrimal(A_scaled, d, w)
   mass = result$f/sum(result$f)
   
   output = list('grid' = u, 'mass' = mass)
   
 }
 
-P_value_VREPB = function(info, VR_par) {
+P_value_VREPB = function(info, grid, mass) {
   
   n1 = info$n1
   n2 = info$n2
@@ -75,11 +87,9 @@ P_value_VREPB = function(info, VR_par) {
   
   tau = S1_list/S2_list
   
-  VR_NPMLE_result = VR_NPMLE(tau = tau, m = m, n1 = n1, n2 = n2, B = VR_par[1], lower_quantile = VR_par[2], upper_quantile = VR_par[3])
-  
   P_value_list_VREPB = rep(0, m)
   for (i in c(1:m)) {
-    P_value_list_VREPB[i] = p_value_VREPB_j(n1 = n1, n2 = n2, Z1 = Z1_list[i], Z2 = Z2_list[i], S1 = S1_list[i], S2 = S2_list[i], VR_NPMLE_result$grid, VR_NPMLE_result$mass, tau[i])
+    P_value_list_VREPB[i] = p_value_VREPB_j(n1 = n1, n2 = n2, Z1 = Z1_list[i], Z2 = Z2_list[i], S1 = S1_list[i], S2 = S2_list[i], grid, mass, tau[i])
   }
   
   return(P_value_list_VREPB)
@@ -87,16 +97,14 @@ P_value_VREPB = function(info, VR_par) {
 
 # P value calculator for DVEPB
 
-p_s_j_given_sigma2 = function(n1, n2, s1_j, s2_j, var_pair) {
-  var1 = var_pair[1]
-  var2 = var_pair[2]
+p_s_j_given_sigma2 = function(n1, n2, s1_j, s2_j, var1, var2) {
   out = ((n1-1)/var1) * 1 / (2^((n1-1)/2) * gamma((n1-1)/2)) * ((n1-1) * s1_j/var1)^((n1-3)/2) * exp((-1/2) * (n1-1) * s1_j/var1) * ((n2-1)/var2) * 1 / (2^((n2-1)/2) * gamma((n2-1)/2)) * ((n2-1) * s2_j/var2)^((n2-3)/2) * exp((-1/2) * (n2-1) * s2_j/var2)
 }
 
-p_given_var1_var2 = function(n1, n2, Z1, Z2, var_pair) {
+p_given_var1_var2 = function(n1, n2, Z1, Z2, var1, var2) {
   
   upper = (Z1 - Z2)
-  lower = sqrt(var_pair[1]/n1 + var_pair[2]/n2)
+  lower = sqrt(var1/n1 + var2/n2)
   
   test_stat = as.numeric(unlist(upper/lower))
   p = pnorm(abs(test_stat), lower.tail = FALSE) * 2
@@ -104,16 +112,16 @@ p_given_var1_var2 = function(n1, n2, Z1, Z2, var_pair) {
   out = p
 }
 
-mass_given_tau_j_DV = function(var_pairs, mass, s1_j, s2_j, n1, n2) {
-  f_s_j_given_grid = p_s_j_given_sigma2(n1, n2, s1_j, s2_j,var_pairs)
+mass_given_tau_j_DV = function(var1, var2, mass, s1_j, s2_j, n1, n2) {
+  f_s_j_given_grid = p_s_j_given_sigma2(n1, n2, s1_j, s2_j, var1, var2)
   f_s_j_grid = f_s_j_given_grid * mass
   post_mass = f_s_j_grid / sum(f_s_j_grid)
   return(post_mass)
 }
 
-p_value_DVEPB_j = function(n1, n2, Z1, Z2, var_pairs, mass, s1_j, s2_j) {
-  P_value_joint_list = p_given_var1_var2(n1, n2, Z1, Z2, var_pairs)
-  post_mass_j = mass_given_tau_j_DV(var_pairs, mass, s1_j, s2_j, n1, n2)
+p_value_DVEPB_j = function(n1, n2, Z1, Z2, grid, mass, s1_j, s2_j) {
+  P_value_joint_list = p_given_var1_var2(n1, n2, Z1, Z2, grid$var1, grid$var2)
+  post_mass_j = mass_given_tau_j_DV(grid$var1, grid$var2, mass, s1_j, s2_j, n1, n2)
   P_value_j = sum(P_value_joint_list * post_mass_j)
   return (P_value_j)
 }
@@ -145,10 +153,14 @@ DV_NPMLE = function(info, B1, B2, lower_quantile, upper_quantile) {
   
   A = matrix(0, nrow = m, ncol = B1 * B2)
   for (i in 1:(B1*B2)) {
-    A[, i] = p_s_j_given_sigma2(n1, n2, S1_list, S2_list, c(var_df[i, 1], var_df[i, 2]))
+    A[, i] = p_s_j_given_sigma2(n1, n2, S1_list, S2_list, var_df[i, 1], var_df[i, 2])
   }
   
-  result = KWPrimal(A, d, w)
+  row_max = apply(A, 1, max)
+  stopifnot(all(is.finite(row_max)), all(row_max > 0))
+  A_scaled = sweep(A, 1, row_max, "/")
+  
+  result = KWPrimal(A_scaled, d, w)
   mass =  result$f/sum(result$f)
   
   output = list('grid' = var_df, 'mass' = mass)
@@ -267,13 +279,15 @@ solver = function(X1, X2, VR_parameter, DV_parameter, algorithm_list) {
   P_list_BF = NA
   P_list_EV = NA
   
+  VR_NPMLE_result = NA
   DV_NPMLE_result = NA
   
   for (code in algorithm_list) {
     
     if (code == 1) {
       print(paste('start of', algorithm_name[code]))
-      P_list_VR = P_value_VREPB(information, VR_parameter)
+      VR_NPMLE_result = VR_NPMLE(information,B = VR_parameter[1], lower_quantile = VR_parameter[2], upper_quantile = VR_parameter[3])
+      P_list_VR = P_value_VREPB(information, VR_NPMLE_result$grid,VR_NPMLE_result$mass)
     }
     
     if (code == 2) {
@@ -302,9 +316,17 @@ solver = function(X1, X2, VR_parameter, DV_parameter, algorithm_list) {
   print('Solver Ends')
   print('')
   
-  if (sum(is.na(DV_NPMLE_result)) > 0) {
-    return (list('VREPB' = P_list_VR, 'DVEPB' = P_list_DV, 'Welch' = P_list_Welch, 'B_F' = P_list_BF, 'EV_test' = P_list_EV))
+  output = list('VREPB' = P_list_VR, 'DVEPB' = P_list_DV, 'Welch' = P_list_Welch, 'B_F' = P_list_BF, 'EV_test' = P_list_EV)
+  
+  if (is.list(VR_NPMLE_result)) {
+    output$'1D_grid' = VR_NPMLE_result$grid
+    output$'1D_mass' = VR_NPMLE_result$mass
   }
   
-  return (list('VREPB' = P_list_VR, 'DVEPB' = P_list_DV, 'Welch' = P_list_Welch, 'B_F' = P_list_BF, 'EV_test' = P_list_EV, '2D_grid' = DV_NPMLE_result$grid, '2D_mass' = DV_NPMLE_result$mass))
+  if (is.list(DV_NPMLE_result)) {
+    output$'2D_grid' = DV_NPMLE_result$grid
+    output$'2D_mass' = DV_NPMLE_result$mass
+  }
+  
+  return(output)
 }

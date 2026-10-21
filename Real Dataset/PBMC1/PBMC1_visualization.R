@@ -8,9 +8,9 @@ source('../../helper functions/Distribution Visualization helper.R')
 ## H
 
 df_2D_weighted_voom = read.csv('./Mod vs HC Result/2D_weighted_voom_ModHC.csv')
-Total_mass = 0.99
+Total_mass = 0.99999
 plot_G_voom = plotter_2D(Total_mass, df_2D_weighted_voom, '')
-ggsave(filename = './Mod vs HC Result/H(var1, var2) with Voom.jpg', plot = plot_G_voom, width = 12, height = 10, dpi = 500)
+#ggsave(filename = './Mod vs HC Result/H(var1, var2) with Voom.jpg', plot = plot_G_voom, width = 12, height = 10, dpi = 500)
 
 # VoombyGroup
 
@@ -18,12 +18,16 @@ ggsave(filename = './Mod vs HC Result/H(var1, var2) with Voom.jpg', plot = plot_
 
 df_2D_weighted_vbg = read.csv('./Mod vs HC Result/2D_weighted_vbg_ModHC.csv')
 plot_G_vbg = plotter_2D(Total_mass, df_2D_weighted_vbg, '')
-ggsave(filename = './Mod vs HC Result/H(var1, var2) with Voombygroup.jpg', plot = plot_G_vbg, width = 12, height = 10, dpi = 500)
+#ggsave(filename = './Mod vs HC Result/H(var1, var2) with Voombygroup.jpg', plot = plot_G_vbg, width = 12, height = 10, dpi = 500)
 
 # Voom vs VoombyGroup
 
-df_lambda = data.frame(x = df_2D_weighted_voom$x/df_2D_weighted_voom$y, prob = df_2D_weighted_voom$prob)
-df_lambda_vbg = data.frame(x = df_2D_weighted_vbg$x/df_2D_weighted_vbg$y, prob = df_2D_weighted_vbg$prob)
+df_1D_weighted_voom = read.csv('./Mod vs HC Result/1D_weighted_voom_ModHC.csv')
+df_1D_weighted_vbg = read.csv('./Mod vs HC Result/1D_weighted_vbg_ModHC.csv')
+
+
+df_lambda = data.frame(x =  df_1D_weighted_voom$x, prob =  df_1D_weighted_voom$prob)
+df_lambda_vbg = data.frame(x = df_1D_weighted_vbg$x, prob = df_1D_weighted_vbg$prob)
 
 df_lambda_with_ecdf = arrange(df_lambda, x) %>% mutate(ecdf = cumsum(prob))
 df_lambda_with_ecdf_vbg = arrange(df_lambda_vbg, x) %>% mutate(ecdf = cumsum(prob))
@@ -54,4 +58,4 @@ p = ggplot(df_plot, aes(x = log_lambda, y = ecdf, color = method)) +
     legend.text.align = 0
   )
 
-ggsave("./Mod vs HC Result/PBMC1 ecdf of G.jpg", p, width = 8, height = 6, dpi = 400)
+#ggsave("./Mod vs HC Result/PBMC1 ecdf of G.jpg", p, width = 8, height = 6, dpi = 400)

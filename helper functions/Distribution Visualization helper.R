@@ -47,19 +47,22 @@ plotter_2D = function(Total_mass, df_2D, title) {
   return (plot_2D)
 }
 
-plotter_1D = function(df_1D, title) {
+plotter_1D = function(df_1D, title = '', x_range = NULL) {
   plot_1D = ggplot(df_1D, aes(x = log(x), y = 0)) +
-    geom_segment(aes(xend = log(x), yend = prob), size = 1, color = "blue") +
+    geom_segment(aes(xend = log(x), yend = prob), linewidth = 1, color = "blue") +
     scale_y_continuous(name = "Density", limits = c(0, max(df_1D$prob))) +
     theme_minimal() +
-    labs(title = title,
-         x = expression(log(lambda[i]))) +
-    theme(plot.title = element_text(hjust = 0.5), 
+    labs(title = title, x = expression(log(lambda[i]))) +
+    theme(plot.title = element_text(hjust = 0.5),
           axis.title = element_text(size = 24),
           axis.text = element_text(size = 15))
-  return (plot_1D)
+  
+  if (!is.null(x_range)) {
+    plot_1D = plot_1D + coord_cartesian(xlim = x_range)
+  }
+  
+  return(plot_1D)
 }
-
 
 plotter_pvalue_histogram = function(p_values, nbins = 50, ymax = 5500) {
   
