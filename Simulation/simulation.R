@@ -1,72 +1,56 @@
 source('../EPB main/EPB.R')
+library(future)
+library(future.apply)
+library(progressr)
+# ----Power, FDR----
 
-# Power, FDR
-
-Power = function(discovery, flag_list) {
-  dis_count = sum(flag_list)
-  true_dis_count = sum(flag_list[discovery])
-  power = true_dis_count/dis_count
-  return (power)
+Power <- function(discovery, flag_list) {
+  alternative_count <- sum(flag_list == 1)
+  sum(flag_list[discovery] == 1) / alternative_count
 }
 
-FDP = function(discovery, flag_list) {
-  false_dis = length(discovery) - sum(flag_list[discovery])
-  fdp = false_dis/max(length(discovery) ,1)
-  return (fdp)
+FDP <- function(discovery, flag_list) {
+  if (length(discovery) == 0) {
+    return(0)
+  }
+  
+  sum(flag_list[discovery] == 0) / length(discovery)
 }
 
-# Data Generator
+# ----Data Generator----
 
 data_generator = function(n1, n2, data_generation_parameter, var_struct) {
   
-  n1=n1
-  n2=n2
-  m=data_generation_parameter$m
-  mu1=data_generation_parameter$mu1
-  mu2=data_generation_parameter$mu2
+  m = data_generation_parameter$m
+  mu1 = data_generation_parameter$mu1
+  mu2 = data_generation_parameter$mu2
   mean_var2 = data_generation_parameter$mean_var2
   var_var2 = data_generation_parameter$var_var2
   pi0 = data_generation_parameter$pi0
   mu0 = data_generation_parameter$mu0
   
-  k = NA
-  d1 = NA
-  d2 = NA
-  a = NA
-  b = NA
+  null_count = as.integer(pi0 * m)
+  dis_count = m - null_count
+  flag_list = c(rep(0, null_count), rep(1, dis_count)) # 0 for null, 1 for alternative
   
-  if (var_struct == 0 | var_struct == 1) {
-    # unequal variance simulation with scaled F distribution or equal variance
-    k=data_generation_parameter$k
-    d1=data_generation_parameter$d1
-    d2=data_generation_parameter$d2
+  var2 = abs(rnorm(m, mean = mean_var2, sd = sqrt(var_var2)))
+  
+  if (var_struct == 0) {
+    # unequal variance simulation with scaled F distribution
+    k = data_generation_parameter$k
+    d1 = data_generation_parameter$d1
+    d2 = data_generation_parameter$d2
+    lambda = k * rf(m, df1 = d1, df2 = d2)
+  }
+  else if (var_struct == 1) {
+    # equal variance
+    lambda = rep(1, m)
   }
   else if (var_struct == 2) {
     # diffused uninformative distribution
     a = data_generation_parameter$a
     b = data_generation_parameter$b
-  }
-  
-  
-  null_count = as.integer(pi0 * m)
-  dis_count = m - null_count
-  flag_list = c(rep(0, null_count), rep(1, dis_count)) # 0 for null, 1 for truth
-  
-  var2 = abs(rnorm(m, mean_var2, sqrt(var_var2)))
-  
-  lambda = NA
-  
-  if (var_struct == 0) {
-    # unequal variance simulation with scaled F distribution
-    lambda = k * rf(m, d1, d2)
-  }
-  else if (var_struct == 1) {
-    # equal variance
-    lambda = array(1, dim = c(m))
-  }
-  else if (var_struct == 2) {
-    # diffused uninformative distribution
-    lambda = exp(runif(m, a, b))
+    lambda = exp(runif(m, min = a, max = b))
   }
   
   var1 = lambda * var2
@@ -76,266 +60,173 @@ data_generator = function(n1, n2, data_generation_parameter, var_struct) {
   
   for (j in 1:m) {
     if (j <= null_count) {
-      X1[j, ] = rnorm(n1, mu0, sqrt(var1[j]))
-      X2[j, ] = rnorm(n2, mu0, sqrt(var2[j]))
+      X1[j, ] = rnorm(n1, mean = mu0, sd = sqrt(var1[j]))
+      X2[j, ] = rnorm(n2, mean = mu0, sd = sqrt(var2[j]))
     }
     else {
-      X1[j, ] = rnorm(n1, rnorm(1, mean = 0, sd = sqrt(mu1 * var1[j])), sqrt(var1[j]))
-      X2[j, ] = rnorm(n2, mu2, sqrt(var2[j]))
+      mu1_j = rnorm(1, mean = 0, sd = sqrt(mu1 * var1[j]))
+      X1[j, ] = rnorm(n1, mean = mu1_j, sd = sqrt(var1[j]))
+      X2[j, ] = rnorm(n2, mean = mu2, sd = sqrt(var2[j]))
     }
   }
   
-  output = list('X1' = X1, 'X2' = X2, 'flag_list' = flag_list)
+  output = list(
+    'X1' = X1,
+    'X2' = X2,
+    'flag_list' = flag_list,
+    'lambda' = lambda,
+    'var1' = var1,
+    'var2' = var2
+  )
   
-  return (output)
+  return(output)
 }
 
-dir_name = function(var_struct, n1, n2, data_generation_parameter, VR_parameter, DV_parameter, alpha) {
+# ----Solver----
+simulation_solver = function(X1, X2, flag_list, VR_parameter, DV_parameter, alpha, algorithm_list) {
   
-  var_structure = 'equal'
-  if (var_struct == 0) {
-    # unequal variance simulation with scaled F distribution
-    var_structure = 'unequal'
-  }
-  else if (var_struct == 1) {
-    # equal variance
-    var_structure = 'equal'
-  }
-  else if (var_struct == 2) {
-    # diffused uninformative distribution
-    var_structure = 'diffuse'
-  }
+  P_value_result = solver(X1,X2,VR_parameter,DV_parameter,algorithm_list,verbose = FALSE)
   
-  n1=n1
-  n2=n2
-  m=data_generation_parameter$m
-  mu1=data_generation_parameter$mu1
-  mu2=data_generation_parameter$mu2
-  mean_var2 = data_generation_parameter$mean_var2
-  var_var2 = data_generation_parameter$var_var2
-  pi0 = data_generation_parameter$pi0
-  mu0 = data_generation_parameter$mu0
+  algorithm_name = c('VREPB', 'DVEPB', 'Welch', 'B_F', 'EV')
   
-  B = VR_parameter[1]
-  l1 = VR_parameter[2]
-  u1 = VR_parameter[3]
+  Power_result = rep(NA_real_, 5)
+  FDP_result = rep(NA_real_, 5)
   
-  B1 = DV_parameter[1]
-  B2 = DV_parameter[2]
-  l2 = DV_parameter[3]
-  u2 = DV_parameter[4]
-  
-  base_dir = paste('Simulation_result/', var_structure, sep = '')
-  
-  if (!dir.exists(base_dir)) {
-    print('Create Base Directory')
-    dir.create(base_dir)
-  }
-  
-  k = NA
-  d1 = NA
-  d2 = NA
-  a = NA
-  b = NA
-  
-  head = NA
-  
-  if (var_struct == 0 | var_struct == 1) {
-    # unequal variance simulation with scaled F distribution or equal variance
-    k=data_generation_parameter$k
-    d1=data_generation_parameter$d1
-    d2=data_generation_parameter$d2
-    
-    head = paste(base_dir, '/(', paste(n1, n2, k, d1, d2,  m,  mu1,  mu2,  mean_var2,  var_var2,  pi0, mu0, B, l1, u1, B1, B2, l2, u2, alpha, sep = ','), ')', sep = '')
-  }
-  else if (var_struct == 2) {
-    # diffused uninformative distribution
-    a = data_generation_parameter$a
-    b = data_generation_parameter$b
-    
-    head = paste(base_dir, '/(', paste(n1, n2, a, b,  m,  mu1,  mu2,  mean_var2,  var_var2,  pi0, mu0, B, l1, u1, B1, B2, l2, u2, alpha, sep = ','), ')', sep = '')
-  }
-  
-  return(head)
-}
-
-file_name = function(rounds, algorithm_list) {
-  time = Sys.time()
-  file = paste(time, ': R=', rounds, '', sep = '')
   for (code in algorithm_list) {
-    file = paste(file, code, sep = ',')
+    P_list = P_value_result[[algorithm_name[code]]]
+    discovery = my_BH(P_list, alpha)
+    Power_result[code] = Power(discovery, flag_list)
+    FDP_result[code] = FDP(discovery, flag_list)
   }
-  return (paste('(', file, ')', sep = ''))
+  
+  output = list(
+    'Power' = Power_result,
+    'FDP' = FDP_result
+  )
+  
+  return(output)
 }
 
-simulator = function(seed, data_generation_parameter, VR_parameter, DV_parameter, alpha, rounds, algorithm_list, var_struct) {
+# ----Simulator----
+dir_name = function(var_struct) {
+  if (var_struct == 0) var_structure = 'unequal'
+  else if (var_struct == 1) var_structure = 'equal'
+  else if (var_struct == 2) var_structure = 'diffuse'
+  return(file.path('Simulation_result', var_structure))
+}
+
+file_name = function(n1, n2) {
+  return(paste0('KA_', n1, '_KB_', n2, '_result.csv'))
+}
+
+simulator = function(n1, n2, seed, data_generation_parameter, VR_parameter, DV_parameter, alpha, rounds, algorithm_list, var_struct, num_workers = 1L) {
   
-  if (!dir.exists('Simulation_result')) {
-    print('Create Data Directory')
-    dir.create('Simulation_result')
-  }
-  
-  set.seed(seed)
-  
-  args = commandArgs(TRUE)
-  
-  n1 = as.integer(args[1])
-  n2 = as.integer(args[2])
-  
-  dir = dir_name(var_struct, n1, n2, data_generation_parameter, VR_parameter, DV_parameter, alpha)
-  file = file_name(rounds, algorithm_list)
+  dir = dir_name(var_struct)
+  file = file_name(n1, n2)
   
   if (!dir.exists(dir)) {
-    print('Create Directory')
-    dir.create(dir)
+    print('Create Result Directory')
+    dir.create(dir, recursive = TRUE)
   }
-  
-  algorithm_name = c('VREPB', 'DVEPB', 'Welch', 'B_F', 'EV_test')
-  
-  FDP_of_algorithms = matrix(0, 5, rounds)
-  Power_of_algorithms = matrix(0, 5, rounds)
   
   print('Simulation Start')
-  print(paste('Parameters:', file.path(dir, file)))
+  print(paste('Result file:', file.path(dir, file)))
+  print(paste('Number of workers:', num_workers))
   
-  r = 1
-  
-  while(r <= rounds) {
-    
-    print(paste('Start of round', r))
-    
-    Rerun = FALSE
-    
+  run_one = function(r) {
+    set.seed(seed + r)
     output_r = data_generator(n1, n2, data_generation_parameter, var_struct)
-    X1 = output_r$X1
-    X2 = output_r$X2
-    flag_list = output_r$flag_list
-    information = information_extractor(X1, X2)
-    m = information$m
-    
-    for (code in algorithm_list) {
-      
-      if (code == 1) {
-        print(paste('start of', algorithm_name[code]))
-        
-        P_list = P_value_VREPB(information, VR_parameter)
-        
-        discovery = my_BH(P_list, alpha)
-        power = Power(discovery, flag_list)
-        fdp = FDP(discovery, flag_list)
-        Power_of_algorithms[code, r] = power
-        FDP_of_algorithms[code, r] = fdp
-        
-        print(c('round' = r, 'algorithm' = algorithm_name[code], 'power' = power, 'fdp' = fdp))
-      }
-      
-      if (code == 2) {
-        print(paste('start of', algorithm_name[code]))
-        
-        DV_NPMLE_result = DV_NPMLE(information, B1 = DV_parameter[1], B2 = DV_parameter[2], lower_quantile = DV_parameter[3], upper_quantile = DV_parameter[4])
-        P_list = P_value_DVEPB(information, DV_NPMLE_result$grid, DV_NPMLE_result$mass)
-        
-        discovery = my_BH(P_list, alpha)
-        power = Power(discovery, flag_list)
-        fdp = FDP(discovery, flag_list)
-        
-        if (power == 0) {
-          print(paste('Error detected and rerun round', r))
-          Rerun = TRUE
-          break
-        }
-        
-        Power_of_algorithms[code, r] = power
-        FDP_of_algorithms[code, r] = fdp
-        
-        print(c('round' = r, 'algorithm' = algorithm_name[code], 'power' = power, 'fdp' = fdp))
-      }
-      
-      if (code == 3) {
-        print(paste('start of', algorithm_name[code]))
-        
-        P_list = P_value_Welch(information)
-        
-        discovery = my_BH(P_list, alpha)
-        power = Power(discovery, flag_list)
-        fdp = FDP(discovery, flag_list)
-        Power_of_algorithms[code, r] = power
-        FDP_of_algorithms[code, r] = fdp
-        
-        print(c('round' = r, 'algorithm' = algorithm_name[code], 'power' = power, 'fdp' = fdp))
-      }
-      
-      if (code == 4) {
-        print(paste('start of', algorithm_name[code]))
-        
-        P_list = P_value_BF(m, X1, X2)
-        
-        discovery = my_BH(P_list, alpha)
-        power = Power(discovery, flag_list)
-        fdp = FDP(discovery, flag_list)
-        Power_of_algorithms[code, r] = power
-        FDP_of_algorithms[code, r] = fdp
-        
-        print(c('round' = r, 'algorithm' = algorithm_name[code], 'power' = power, 'fdp' = fdp))
-      }
-      
-      if (code == 5) {
-        print(paste('start of', algorithm_name[code]))
-        
-        P_list = P_value_EV_test(m, X1, X2)
-        
-        discovery = my_BH(P_list, alpha)
-        power = Power(discovery, flag_list)
-        fdp = FDP(discovery, flag_list)
-        Power_of_algorithms[code, r] = power
-        FDP_of_algorithms[code, r] = fdp
-        
-        print(c('round' = r, 'algorithm' = algorithm_name[code], 'power' = power, 'fdp' = fdp))
-      }
-      
-    }
-    
-    if (Rerun) {
-      next
-    }
-    
-    print(paste('End of round', r))
-    print('')
-    
-    print('Updating Round Data')
-    
-    power_df_r = data.frame('Round_Power' = c(1:r), 'VREPB' = Power_of_algorithms[1, 1:r], 'DVEPB' = Power_of_algorithms[2, 1:r], 'Welch' = Power_of_algorithms[3, 1:r], 'B_F' = Power_of_algorithms[4, 1:r], 'EV_test' = Power_of_algorithms[5, 1:r])
-    write.csv(power_df_r, file = paste(file.path(dir, file), '_power.csv', sep = ''))
-    fdp_df_r = data.frame('Round_FDP' = c(1:r), 'VREPB' = FDP_of_algorithms[1, 1:r], 'DVEPB' = FDP_of_algorithms[2, 1:r], 'Welch' = FDP_of_algorithms[3, 1:r], 'B_F' = FDP_of_algorithms[4, 1:r], 'EV_test' = FDP_of_algorithms[5, 1:r])
-    write.csv(fdp_df_r, file = paste(file.path(dir, file), '_fdp.csv', sep = ''))
-    
-    r = r + 1
-    
+    result_r = simulation_solver(output_r$X1, output_r$X2, output_r$flag_list, VR_parameter, DV_parameter, alpha, algorithm_list)
+    return(result_r)
   }
   
+  if (num_workers == 1L) {
+    pb = txtProgressBar(min = 0, max = rounds, style = 3)
+    round_results = tryCatch(
+      lapply(seq_len(rounds), function(r) {
+        result_r = run_one(r)
+        setTxtProgressBar(pb, r)
+        return(result_r)
+      }),
+      finally = close(pb)
+    )
+  } else {
+    old_plan = future::plan()
+    on.exit(future::plan(old_plan), add = TRUE)
+    future::plan(future::multisession, workers = num_workers)
+    
+    old_progressr_enable = getOption('progressr.enable')
+    old_progressr_handlers = progressr::handlers()
+    on.exit({
+      options(progressr.enable = old_progressr_enable)
+      progressr::handlers(old_progressr_handlers)
+    }, add = TRUE)
+    
+    options(progressr.enable = TRUE)
+    progressr::handlers(progressr::handler_txtprogressbar(clear = FALSE))
+    
+    round_results = progressr::with_progress({
+      progress = progressr::progressor(steps = rounds)
+      progress(amount = 0)
+      future.apply::future_lapply(
+        seq_len(rounds),
+        function(r) {
+          result_r = run_one(r)
+          progress(message = paste('Round', r))
+          return(result_r)
+        },
+        future.seed = NULL,
+        future.chunk.size = 1,
+        future.packages = c('REBayes', 'Rmosek', 'asht')
+      )
+    })
+  }
+  
+  Power_of_algorithms = do.call(cbind, lapply(round_results, function(x) x$Power))
+  FDP_of_algorithms = do.call(cbind, lapply(round_results, function(x) x$FDP))
+  
+  result_df = data.frame(
+    'vrepb_fdp' = FDP_of_algorithms[1, ], 'vrepb_power' = Power_of_algorithms[1, ],
+    'dvepb_fdp' = FDP_of_algorithms[2, ], 'dvepb_power' = Power_of_algorithms[2, ],
+    'welch_fdp' = FDP_of_algorithms[3, ], 'welch_power' = Power_of_algorithms[3, ],
+    'b_f_fdp' = FDP_of_algorithms[4, ], 'b_f_power' = Power_of_algorithms[4, ],
+    'ev_fdp' = FDP_of_algorithms[5, ], 'ev_power' = Power_of_algorithms[5, ]
+  )
+  
+  write.csv(result_df, file = file.path(dir, file), row.names = FALSE)
+  
   print('Simulation Over')
-  print('Saving Simulation Result')
+  print(paste('Result saved to:', file.path(dir, file)))
   
-  Power_list = rowMeans(Power_of_algorithms)
-  FDR_list = rowMeans(FDP_of_algorithms)
-  simulation_result = data.frame('Algorithm' = algorithm_name[algorithm_list], 'Power' = Power_list[algorithm_list], 'FDR' = FDR_list[algorithm_list])
-  write.csv(simulation_result, file = paste(file.path(dir, file), '_summary.csv', sep = ''))
-  
-  print(simulation_result)
-  
-  return (0)
+  return(result_df)
 }
 
-#seed = Sys.time()
+
+args = commandArgs(trailingOnly = TRUE)
+
+get_argument = function(name, default = NULL) {
+  position = match(paste0('--', name), args)
+  if (is.na(position)) {
+    if (!is.null(default)) return(default)
+    stop(paste0('Missing argument: --', name))
+  }
+  if (position == length(args)) stop(paste0('Missing value for argument: --', name))
+  return(args[position + 1])
+}
+
+var_struct = as.integer(get_argument('var_struct')) # 0: unequal; 1: equal; 2: diffuse
+KA = as.integer(get_argument('KA'))
+KB = as.integer(get_argument('KB'))
+rounds = as.integer(get_argument('rounds', 50))
+num_workers = as.integer(get_argument('num_workers'))
+
 seed = 2
 alpha = 0.1
-rounds = 25
 VR_parameter = c(1000, 0, 1.0)
 DV_parameter = c(80, 80, 0.01, 1)
-algorithm_list = c(2)
-var_struct = 2 # 0: unequal; 1: equal; 2: diffuse
+algorithm_list = 1:5
+
 data_generation_parameter = data.frame('k' = 2, 'd1' = 8, 'd2' = 12, 'm' = 5000, 'mu1' = 12, 'mu2' = 0, 'mean_var2' = 6, 'var_var2' = 4, 'pi0' = 0.9, 'mu0' = 0)
-if (var_struct == 2) {
-  data_generation_parameter = data.frame('a' = -15, 'b' = 15, 'm' = 5000, 'mu1' = 12, 'mu2' = 0, 'mean_var2' = 6, 'var_var2' = 4, 'pi0' = 0.9, 'mu0' = 0)
-}
-simulator(seed, data_generation_parameter, VR_parameter, DV_parameter, alpha, rounds, algorithm_list, var_struct)
+if (var_struct == 2) data_generation_parameter = data.frame('a' = -5, 'b' = 5, 'm' = 5000, 'mu1' = 12, 'mu2' = 0, 'mean_var2' = 6, 'var_var2' = 4, 'pi0' = 0.9, 'mu0' = 0)
+
+invisible(simulator(KA, KB, seed, data_generation_parameter, VR_parameter, DV_parameter, alpha, rounds, algorithm_list, var_struct, num_workers))

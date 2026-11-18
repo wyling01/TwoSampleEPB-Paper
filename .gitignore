@@ -1,0 +1,12 @@
+# macOS metadata
+.DS_Store
+
+# R session files
+.RData
+.Rhistory
+
+# Downloaded or generated application inputs
+/Real Dataset/GSE9101/GSE9101_raw/
+/Real Dataset/GSE9101/GSE9101 Matrix/
+/Real Dataset/PBMC1/PBMC1 Data/
+/Real Dataset/chip-seq/chipseq_data/

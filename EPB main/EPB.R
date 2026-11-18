@@ -22,6 +22,10 @@ p_tau_j_given_lambda = function(n1, n2, tau_j, lambda) {
   out = (1 / lambda) * (1 / beta((n1-1)/2, (n2-1)/2)) * ((n1-1)/(n2-1))^((n1-1)/2) * (tau_j/lambda) ^ ((n1-3)/2) * ((n1-1)/(n2-1)*tau_j/lambda + 1)^(-(n1+n2-2)/2)
 }
 
+log_p_tau_j_given_lambda = function(n1, n2, tau_j, lambda) {
+  out = df(tau_j/lambda, df1 = n1-1, df2 = n2-1, log = TRUE) - log(lambda)
+}
+
 p_given_lambda = function(n1, n2, Z1, Z2, S1, S2, lambda) {
   
   upper = (Z1 - Z2) * sqrt(n1 + n2 - 2)
@@ -35,9 +39,9 @@ p_given_lambda = function(n1, n2, Z1, Z2, S1, S2, lambda) {
 }
 
 mass_given_tau_j_VR = function(n1, n2, grid, mass, tau_j) {
-  f_tau_j_given_grid = p_tau_j_given_lambda(n1, n2, tau_j, grid)
-  f_tau_j_grid = f_tau_j_given_grid * mass
-  post_mass = f_tau_j_grid / sum(f_tau_j_grid)
+  log_weight = log_p_tau_j_given_lambda(n1, n2, tau_j, grid) + log(mass)
+  post_mass = exp(log_weight - max(log_weight))
+  post_mass = post_mass / sum(post_mass)
   return(post_mass)
 }
 
@@ -54,22 +58,34 @@ VR_NPMLE = function(info, B, lower_quantile, upper_quantile) {
   n2 = info$n2
   S1_list = info$S1_list
   S2_list = info$S2_list
-  
+
+  if (length(m) != 1 || !is.finite(m) || m < 1) stop("m must be a positive finite scalar.")
+  if (length(n1) != 1 || !is.finite(n1) || n1 <= 1 || length(n2) != 1 || !is.finite(n2) || n2 <= 1) stop("n1 and n2 must both be greater than 1.")
+  if (length(S1_list) != m || length(S2_list) != m) stop("The lengths of S1_list and S2_list must both equal m.")
+  if (any(!is.finite(S1_list)) || any(!is.finite(S2_list)) || any(S1_list <= 0) || any(S2_list <= 0)) stop("All sample variances must be finite and strictly positive.")
+  if (length(B) != 1 || !is.finite(B) || B < 1 || B != as.integer(B)) stop("B must be a positive integer.")
+  if (length(lower_quantile) != 1 || length(upper_quantile) != 1 || !is.finite(lower_quantile) || !is.finite(upper_quantile) || lower_quantile < 0 || upper_quantile > 1 || lower_quantile > upper_quantile) stop("Quantiles must satisfy 0 <= lower_quantile <= upper_quantile <= 1.")
+
   tau = S1_list/S2_list
+  if (any(!is.finite(tau)) || any(tau <= 0)) stop("All sample variance ratios must be finite and strictly positive.")
 
   lower = quantile(tau, lower_quantile)
   upper = quantile(tau, upper_quantile)
+  if (!is.finite(lower) || !is.finite(upper) || lower <= 0 || upper <= 0) stop("The NPMLE grid bounds must be finite and strictly positive.")
   log_u = seq(log(lower), log(upper), length = B)
   u = exp(log_u)
   d = rep(1,B)
   w = rep(1, m)/m
-  A = outer(tau, u, FUN = p_tau_j_given_lambda, n1 = n1, n2 = n2)
-  row_max = apply(A, 1, max)
-  stopifnot(all(is.finite(row_max)), all(row_max > 0))
-  A_scaled = sweep(A, 1, row_max, "/")
+  log_A = outer(tau, u, FUN = log_p_tau_j_given_lambda, n1 = n1, n2 = n2)
+  row_max = apply(log_A, 1, max)
+  A_scaled = exp(sweep(log_A, 1, row_max, "-"))
   
   result = KWPrimal(A_scaled, d, w)
-  mass = result$f/sum(result$f)
+  mass = as.numeric(result$f)
+  if (any(mass < -1e-8)) warning(paste0("KWPrimal returned clearly negative masses; minimum mass = ", signif(min(mass), 6), ". Negative masses will be truncated to zero."))
+  mass[mass < 0] = 0
+  if (!is.finite(sum(mass)) || sum(mass) <= 0) stop("The total nonnegative mass returned by KWPrimal is invalid.")
+  mass = mass/sum(mass)
   
   output = list('grid' = u, 'mass' = mass)
   
@@ -101,6 +117,10 @@ p_s_j_given_sigma2 = function(n1, n2, s1_j, s2_j, var1, var2) {
   out = ((n1-1)/var1) * 1 / (2^((n1-1)/2) * gamma((n1-1)/2)) * ((n1-1) * s1_j/var1)^((n1-3)/2) * exp((-1/2) * (n1-1) * s1_j/var1) * ((n2-1)/var2) * 1 / (2^((n2-1)/2) * gamma((n2-1)/2)) * ((n2-1) * s2_j/var2)^((n2-3)/2) * exp((-1/2) * (n2-1) * s2_j/var2)
 }
 
+log_p_s_j_given_sigma2 = function(n1, n2, s1_j, s2_j, var1, var2) {
+  out = dchisq((n1-1)*s1_j/var1, df = n1-1, log = TRUE) + log(n1-1) - log(var1) + dchisq((n2-1)*s2_j/var2, df = n2-1, log = TRUE) + log(n2-1) - log(var2)
+}
+
 p_given_var1_var2 = function(n1, n2, Z1, Z2, var1, var2) {
   
   upper = (Z1 - Z2)
@@ -113,9 +133,9 @@ p_given_var1_var2 = function(n1, n2, Z1, Z2, var1, var2) {
 }
 
 mass_given_tau_j_DV = function(var1, var2, mass, s1_j, s2_j, n1, n2) {
-  f_s_j_given_grid = p_s_j_given_sigma2(n1, n2, s1_j, s2_j, var1, var2)
-  f_s_j_grid = f_s_j_given_grid * mass
-  post_mass = f_s_j_grid / sum(f_s_j_grid)
+  log_weight = log_p_s_j_given_sigma2(n1, n2, s1_j, s2_j, var1, var2) + log(mass)
+  post_mass = exp(log_weight - max(log_weight))
+  post_mass = post_mass / sum(post_mass)
   return(post_mass)
 }
 
@@ -135,14 +155,23 @@ DV_NPMLE = function(info, B1, B2, lower_quantile, upper_quantile) {
   Z2_list = info$Z2_list
   S1_list = info$S1_list
   S2_list = info$S2_list
-  
+
+  if (length(m) != 1 || !is.finite(m) || m < 1) stop("m must be a positive finite scalar.")
+  if (length(n1) != 1 || !is.finite(n1) || n1 <= 1 || length(n2) != 1 || !is.finite(n2) || n2 <= 1) stop("n1 and n2 must both be greater than 1.")
+  if (length(S1_list) != m || length(S2_list) != m) stop("The lengths of S1_list and S2_list must both equal m.")
+  if (any(!is.finite(S1_list)) || any(!is.finite(S2_list)) || any(S1_list <= 0) || any(S2_list <= 0)) stop("All sample variances must be finite and strictly positive.")
+  if (length(B1) != 1 || !is.finite(B1) || B1 < 1 || B1 != as.integer(B1) || length(B2) != 1 || !is.finite(B2) || B2 < 1 || B2 != as.integer(B2)) stop("B1 and B2 must be positive integers.")
+  if (length(lower_quantile) != 1 || length(upper_quantile) != 1 || !is.finite(lower_quantile) || !is.finite(upper_quantile) || lower_quantile < 0 || upper_quantile > 1 || lower_quantile > upper_quantile) stop("Quantiles must satisfy 0 <= lower_quantile <= upper_quantile <= 1.")
+
   lower1 = quantile(S1_list, lower_quantile)
   upper1 = quantile(S1_list, upper_quantile)
+  if (!is.finite(lower1) || !is.finite(upper1) || lower1 <= 0 || upper1 <= 0) stop("The group-A grid bounds must be finite and strictly positive.")
   log_u1 = seq(log(lower1), log(upper1), length = B1)
   u1 = exp(log_u1)
   
   lower2 = quantile(S2_list, lower_quantile)
   upper2 = quantile(S2_list, upper_quantile)
+  if (!is.finite(lower2) || !is.finite(upper2) || lower2 <= 0 || upper2 <= 0) stop("The group-B grid bounds must be finite and strictly positive.")
   log_u2 = seq(log(lower2), log(upper2), length = B2)
   u2 = exp(log_u2)
   
@@ -151,17 +180,20 @@ DV_NPMLE = function(info, B1, B2, lower_quantile, upper_quantile) {
   d = rep(1, B1 * B2)
   w = rep(1, m)/m
   
-  A = matrix(0, nrow = m, ncol = B1 * B2)
+  log_A = matrix(0, nrow = m, ncol = B1 * B2)
   for (i in 1:(B1*B2)) {
-    A[, i] = p_s_j_given_sigma2(n1, n2, S1_list, S2_list, var_df[i, 1], var_df[i, 2])
+    log_A[, i] = log_p_s_j_given_sigma2(n1, n2, S1_list, S2_list, var_df[i, 1], var_df[i, 2])
   }
   
-  row_max = apply(A, 1, max)
-  stopifnot(all(is.finite(row_max)), all(row_max > 0))
-  A_scaled = sweep(A, 1, row_max, "/")
+  row_max = apply(log_A, 1, max)
+  A_scaled = exp(sweep(log_A, 1, row_max, "-"))
   
   result = KWPrimal(A_scaled, d, w)
-  mass =  result$f/sum(result$f)
+  mass = as.numeric(result$f)
+  if (any(mass < -1e-8)) warning(paste0("KWPrimal returned clearly negative masses; minimum mass = ", signif(min(mass), 6), ". Negative masses will be truncated to zero."))
+  mass[mass < 0] = 0
+  if (!is.finite(sum(mass)) || sum(mass) <= 0) stop("The total nonnegative mass returned by KWPrimal is invalid.")
+  mass = mass/sum(mass)
   
   output = list('grid' = var_df, 'mass' = mass)
   
@@ -233,16 +265,16 @@ P_value_BF = function(m, X1, X2) {
 
 # P value calculation for Equal Variance t-test
 
-P_value_EV_test = function (m, X1, X2) {
+P_value_EV = function (m, X1, X2) {
   
-  P_value_list_EV_test = rep(0, m)
+  P_value_list_EV = rep(0, m)
   for (i in 1:m) {
     X1_i = X1[i, ]
     X2_i = X2[i, ]
-    P_value_list_EV_test[i] = t.test(X1_i, X2_i, var.equal = TRUE)$p.value
+    P_value_list_EV[i] = t.test(X1_i, X2_i, var.equal = TRUE)$p.value
   }
   
-  return (P_value_list_EV_test)
+  return (P_value_list_EV)
 }
 
 # extract sufficient statistics
@@ -265,11 +297,11 @@ information_extractor = function(X1, X2) {
 
 # solver
 
-solver = function(X1, X2, VR_parameter, DV_parameter, algorithm_list) {
+solver = function(X1, X2, VR_parameter, DV_parameter, algorithm_list, verbose = TRUE) {
   
-  algorithm_name = c('VREPB', 'DVEPB', 'Welch', 'B_F', 'EV_test')
+  algorithm_name = c('VREPB', 'DVEPB', 'Welch', 'B_F', 'EV')
   
-  print('Solver Starts')
+  if (verbose) {print('Solver Starts')}
   
   information = information_extractor(X1, X2)
   
@@ -285,38 +317,38 @@ solver = function(X1, X2, VR_parameter, DV_parameter, algorithm_list) {
   for (code in algorithm_list) {
     
     if (code == 1) {
-      print(paste('start of', algorithm_name[code]))
+      if (verbose) {print(paste('start of', algorithm_name[code]))}
       VR_NPMLE_result = VR_NPMLE(information,B = VR_parameter[1], lower_quantile = VR_parameter[2], upper_quantile = VR_parameter[3])
       P_list_VR = P_value_VREPB(information, VR_NPMLE_result$grid,VR_NPMLE_result$mass)
     }
     
     if (code == 2) {
-      print(paste('start of', algorithm_name[code]))
+      if (verbose) {print(paste('start of', algorithm_name[code]))}
       DV_NPMLE_result = DV_NPMLE(information, B1 = DV_parameter[1], B2 = DV_parameter[2], lower_quantile = DV_parameter[3], upper_quantile = DV_parameter[4])
       P_list_DV = P_value_DVEPB(information, DV_NPMLE_result$grid, DV_NPMLE_result$mass)
     }
     
     if (code == 3) {
-      print(paste('start of', algorithm_name[code]))
+      if (verbose) {print(paste('start of', algorithm_name[code]))}
       P_list_Welch = P_value_Welch(information)
     }
     
     if (code == 4) {
-      print(paste('start of', algorithm_name[code]))
+      if (verbose) {print(paste('start of', algorithm_name[code]))}
       P_list_BF = P_value_BF(information$m, X1, X2)
     }
     
     if (code == 5) {
-      print(paste('start of', algorithm_name[code]))
-      P_list_EV = P_value_EV_test(information$m, X1, X2)
+      if (verbose) {print(paste('start of', algorithm_name[code]))}
+      P_list_EV = P_value_EV(information$m, X1, X2)
     }
     
   }
   
-  print('Solver Ends')
-  print('')
+  if (verbose) {print('Solver Ends')}
+  if (verbose) {print('')}
   
-  output = list('VREPB' = P_list_VR, 'DVEPB' = P_list_DV, 'Welch' = P_list_Welch, 'B_F' = P_list_BF, 'EV_test' = P_list_EV)
+  output = list('VREPB' = P_list_VR, 'DVEPB' = P_list_DV, 'Welch' = P_list_Welch, 'B_F' = P_list_BF, 'EV' = P_list_EV)
   
   if (is.list(VR_NPMLE_result)) {
     output$'1D_grid' = VR_NPMLE_result$grid

@@ -1,0 +1,108 @@
+schema_version: 1
+
+environment:
+  r: "4.4.2"
+  bioconductor: "3.20"
+  tested_platform: "aarch64-apple-darwin20"
+
+external_software:
+  mosek: "11.0.6"
+  rmosek: "11.0.0"
+  pdflatex: "pdfTeX 1.40.29 (TeX Live 2026)"
+  paper_plot_tex_packages:
+    - tikz
+    - standalone
+    - lmodern
+    - amsmath
+    - graphicx
+
+r_packages:
+  core:
+    REBayes: "2.60"
+    asht: "1.0.3"
+  simulation:
+    future: "1.82.0"
+    future.apply: "1.20.2"
+    progressr: "1.1.0"
+  gse9101:
+    GEOquery: "2.74.0"
+    Biobase: "2.66.0"
+    affy: "1.84.0"
+    hgu133plus2cdf: "2.18.0"
+    hgu133plus2.db: "3.13.0"
+    AnnotationDbi: "1.68.0"
+    R.utils: "2.13.0"
+  chipseq:
+    MAnorm2: "1.2.2"
+  pbmc1:
+    limma: "3.62.2"
+    edgeR: "4.4.2"
+    SingleCellExperiment: "1.28.1"
+
+data_sources:
+  gse9101:
+    source: "NCBI Gene Expression Omnibus"
+    accession: "GSE9101"
+    supplementary_file: "GSE9101_RAW.tar"
+    sha256: "2fff6c415d8fd835089e65ec519efddc8940e7002fa88a26cf604b821b0d642f"
+    expected_raw_samples: 12
+    expected_gene_matrix_dimensions: [20980, 12]
+  chipseq:
+    source: "https://github.com/tushiqi/MAnorm2"
+    commit: "5fd6bdb1a19f5f4cd000a9ed4c804dcddcc443b5"
+    files:
+      GM12891_cmp_GM12892.H3K4me3_hieMA.xls:
+        sha256: "afd261214182a77ed565fa1d2d75f45dfdb60fb8e0a36bce6e97f2e9bbd72a39"
+      GM12891_cmp_GM12892.H3K4me3_profile_bins.xls:
+        sha256: "7dde324429e4c76dbee2fb45c76ed86371c95760947d3eb6d29e45e5275d09b3"
+  pbmc1:
+    source: "https://github.com/YOU-k/voomByGroup"
+    commit: "38c8abfba1d329dcef9d099bc0351f8f293ac307"
+    file: "data/pbmc_pb.rds"
+    sha256: "19d474814a8e76183db1b334a4b03b5bb59bfa5db71c7b3837d8c50eee71b9fb"
+    cell_type: "CD56dim CD16+ NK"
+    comparison: ["Moderate", "HC"]
+    expected_count_matrix_dimensions: [8462, 8]
+
+expected_application_results:
+  alpha:
+    gse9101: 0.01
+    chipseq: 0.01
+    pbmc1: 0.10
+  gse9101_significant:
+    VREPB: 2325
+    DVEPB: 2941
+    Welch: 1614
+    B_F: 0
+    EV: 2180
+  chipseq:
+    EVratio: 1.2756994798302002
+    significant:
+      VREPB: 2966
+      DVEPB: 9342
+      Welch: 0
+      B_F: 0
+      EV: 2938
+      EVratio: 2968
+  pbmc1_significant:
+    Voom:
+      VREPB: 7
+      DVEPB: 286
+      Welch: 0
+      B_F: 0
+      EV: 4
+    VoombyGroup:
+      VREPB: 7
+      DVEPB: 339
+      Welch: 0
+      B_F: 0
+      EV: 7
+
+simulation:
+  base_seed: 2
+  alpha: 0.10
+  rounds_per_setting: 50
+  variance_structure_codes:
+    0: unequal
+    1: equal
+    2: diffuse
