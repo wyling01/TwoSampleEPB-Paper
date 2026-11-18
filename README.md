@@ -1,6 +1,6 @@
 # TwoSampleEPB
 
-Reproduction code for the TwoSampleEPB paper. The repository contains the core
+Reproduction code for “*Empirical partially Bayes two sample testing*”. The repository contains the core
 VREPB and DVEPB implementations, three data applications, the simulation study,
 and scripts that render the paper figures.
 
